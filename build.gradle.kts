@@ -24,7 +24,7 @@ repositories {
 }
 
 extra["resilience4jVersion"] = "2.2.0"
-extra["testcontainersVersion"] = "1.20.1"
+extra["testcontainersVersion"] = "2.0.5"
 
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-web")
@@ -42,8 +42,8 @@ dependencies {
     annotationProcessor("org.projectlombok:lombok")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
-    testImplementation("org.testcontainers:junit-jupiter")
-    testImplementation("org.testcontainers:postgresql")
+    testImplementation("org.testcontainers:testcontainers-junit-jupiter")
+    testImplementation("org.testcontainers:testcontainers-postgresql")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
 }
 
@@ -55,4 +55,6 @@ dependencyManagement {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+    environment("DOCKER_HOST", "unix:///var/run/docker.sock")
+    environment("TESTCONTAINERS_RYUK_DISABLED", "true")
 }
