@@ -95,7 +95,7 @@ public class LastfmClient {
         });
     }
 
-    // --- Response DTOs (Records) ---
+    // --- レスポンス DTO（Records）---
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record ArtistSearchResult(Results results) {

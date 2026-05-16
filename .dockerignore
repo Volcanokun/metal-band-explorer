@@ -1,0 +1,11 @@
+.git
+.github
+.gradle
+build/
+frontend/node_modules/
+frontend/dist/
+infra/
+docs/
+*.md
+.env
+**/.DS_Store
