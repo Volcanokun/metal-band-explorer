@@ -6,7 +6,6 @@ import com.metalexplorer.api.dto.SimilarArtistDto;
 import com.metalexplorer.api.dto.TagDto;
 import com.metalexplorer.domain.artist.Artist;
 import com.metalexplorer.domain.artist.ArtistTag;
-import com.metalexplorer.domain.artist.SimilarArtist;
 import com.metalexplorer.domain.history.SearchHistory;
 import com.metalexplorer.repository.ArtistRepository;
 import com.metalexplorer.repository.ArtistTagRepository;
@@ -25,6 +24,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import static net.logstash.logback.argument.StructuredArguments.kv;
+
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -36,24 +37,18 @@ public class ArtistService {
     private final SearchHistoryRepository searchHistoryRepository;
     private final LastfmClient lastfmClient;
     private final CircuitBreakerRegistry circuitBreakerRegistry;
+    private final MetricsService metricsService;
 
     @Transactional
     public SearchResponse search(String query, String sessionId) {
         MDC.put("artistName", query);
         try {
             List<Artist> dbResults = artistRepository.findByNameContainingIgnoreCase(query);
-
             if (!dbResults.isEmpty()) {
                 log.info("DB cache hit for query: {}", query);
+                metricsService.recordCacheHit("db");
                 recordHistory(sessionId, query, dbResults.get(0).getId());
                 return toSearchResponse(query, dbResults);
-            }
-
-            CircuitBreaker cb = circuitBreakerRegistry.circuitBreaker("lastfmApi");
-            if (cb.getState() == CircuitBreaker.State.OPEN) {
-                log.warn("Circuit breaker is OPEN, returning empty result for query: {}", query);
-                recordHistory(sessionId, query, null);
-                return new SearchResponse(query, 0, List.of());
             }
 
             List<Artist> fetched = fetchAndCacheFromLastfm(query);
@@ -86,20 +81,35 @@ public class ArtistService {
     }
 
     private List<Artist> fetchAndCacheFromLastfm(String query) {
+        var sample = metricsService.startLatencySample();
         try {
             var searchResult = lastfmClient.searchArtist(query).get();
-            if (searchResult == null || searchResult.results() == null) return List.of();
+            metricsService.stopLatencySample(sample, "searchArtist");
+            metricsService.recordApiCall("searchArtist", true);
 
+            if (searchResult == null || searchResult.results() == null) return List.of();
             var matches = searchResult.results().artistmatches().artist();
             if (matches == null || matches.isEmpty()) return List.of();
 
+            metricsService.recordCacheHit("api");
             return matches.stream()
                     .map(match -> fetchAndSaveArtistDetails(match.name(), match.mbid()))
                     .toList();
         } catch (Exception e) {
-            log.error("Failed to fetch from Last.fm: {}", e.getMessage());
-            return List.of();
+            metricsService.stopLatencySample(sample, "searchArtist");
+            metricsService.recordApiCall("searchArtist", false);
+            return lastfmClientSearchFallback(query, e);
         }
+    }
+
+    // Explicit fallback: DB から類似名称を返しつつ CB 状態と例外種別を構造化ログに出力する
+    private List<Artist> lastfmClientSearchFallback(String query, Exception ex) {
+        CircuitBreaker cb = circuitBreakerRegistry.circuitBreaker("lastfmApi");
+        log.warn("Last.fm API fallback triggered",
+                kv("cbState", cb.getState().name()),
+                kv("exceptionType", ex.getClass().getSimpleName()),
+                kv("query", query));
+        return artistRepository.findByNameContainingIgnoreCase(query);
     }
 
     private Artist fetchAndSaveArtistDetails(String name, String mbid) {
