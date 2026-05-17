@@ -4,12 +4,10 @@ spring:
     username: sa
     password:
     driver-class-name: org.h2.Driver
-  jpa:
-    hibernate:
-      ddl-auto: create-drop
-    properties:
-      hibernate:
-        dialect: org.hibernate.dialect.H2Dialect
+  sql:
+    init:
+      schema-locations: classpath:test-schema.sql
+      mode: always
   flyway:
     enabled: false
   batch:
@@ -19,6 +17,12 @@ spring:
       enabled: false
   quartz:
     auto-startup: false
+
+mybatis:
+  mapper-locations: classpath:mapper/*.xml
+  type-aliases-package: com.metalexplorer.domain.artist,com.metalexplorer.domain.history,com.metalexplorer.domain.tag
+  configuration:
+    map-underscore-to-camel-case: true
 
 lastfm:
   api-key: test-api-key

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.metalexplorer.mapper.SearchHistoryMapper">
+
+    <insert id="insert">
+        INSERT INTO search_history (id, session_id, query, resolved_artist_id, searched_at)
+        VALUES (#{id}, #{sessionId}, #{query}, #{resolvedArtistId}, #{searchedAt})
+    </insert>
+
+    <select id="findAll" resultType="com.metalexplorer.domain.history.SearchHistory">
+        SELECT id, session_id, query, resolved_artist_id, searched_at
+        FROM search_history
+    </select>
+
+</mapper>

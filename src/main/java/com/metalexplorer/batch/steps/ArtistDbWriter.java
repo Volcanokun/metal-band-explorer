@@ -4,17 +4,17 @@ import com.metalexplorer.batch.EnrichedArtist;
 import com.metalexplorer.domain.artist.Artist;
 import com.metalexplorer.domain.artist.ArtistTag;
 import com.metalexplorer.domain.artist.SimilarArtist;
-import com.metalexplorer.repository.ArtistRepository;
+import com.metalexplorer.mapper.ArtistMapper;
+import com.metalexplorer.mapper.ArtistTagMapper;
+import com.metalexplorer.mapper.SimilarArtistMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.item.Chunk;
 import org.springframework.batch.item.ItemWriter;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -23,8 +23,9 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class ArtistDbWriter implements ItemWriter<EnrichedArtist> {
 
-    private final ArtistRepository artistRepository;
-    private final JdbcTemplate jdbc;
+    private final ArtistMapper artistMapper;
+    private final ArtistTagMapper artistTagMapper;
+    private final SimilarArtistMapper similarArtistMapper;
 
     @Override
     @Transactional
@@ -39,54 +40,80 @@ public class ArtistDbWriter implements ItemWriter<EnrichedArtist> {
     }
 
     private Artist upsertArtist(EnrichedArtist enriched) {
-        Artist artist = artistRepository.findByNameIgnoreCase(enriched.name())
-                .orElseGet(() -> Artist.builder().name(enriched.name()).build());
-
-        artist.setMbid(enriched.mbid());
-        artist.setListeners(enriched.listeners());
-        artist.setPlaycount(enriched.playcount());
-        artist.setBioSummary(enriched.bioSummary());
-        artist.setLastFetchedAt(LocalDateTime.now());
-
-        return artistRepository.saveAndFlush(artist);
+        return artistMapper.findByNameIgnoreCase(enriched.name())
+                .map(existing -> {
+                    existing.setMbid(enriched.mbid());
+                    existing.setListeners(enriched.listeners());
+                    existing.setPlaycount(enriched.playcount());
+                    existing.setBioSummary(enriched.bioSummary());
+                    existing.setLastFetchedAt(LocalDateTime.now());
+                    artistMapper.update(existing);
+                    return existing;
+                })
+                .orElseGet(() -> {
+                    Artist artist = Artist.builder()
+                            .id(UUID.randomUUID())
+                            .name(enriched.name())
+                            .mbid(enriched.mbid())
+                            .listeners(enriched.listeners())
+                            .playcount(enriched.playcount())
+                            .bioSummary(enriched.bioSummary())
+                            .lastFetchedAt(LocalDateTime.now())
+                            .createdAt(LocalDateTime.now())
+                            .build();
+                    artistMapper.insert(artist);
+                    return artist;
+                });
     }
 
     private void replaceTags(UUID artistId, List<EnrichedArtist.Tag> tags) {
-        jdbc.update("DELETE FROM artist_tags WHERE artist_id = ?", artistId);
+        artistTagMapper.deleteByArtistId(artistId);
         if (tags.isEmpty()) return;
 
-        List<Object[]> batch = tags.stream()
-                .map(t -> new Object[]{artistId, t.name(), t.weight()})
+        List<ArtistTag> list = tags.stream()
+                .map(t -> ArtistTag.builder()
+                        .artistId(artistId)
+                        .tagName(t.name())
+                        .weight(t.weight())
+                        .build())
                 .toList();
-        jdbc.batchUpdate(
-                "INSERT INTO artist_tags (artist_id, tag_name, weight) VALUES (?, ?, ?)",
-                batch);
+        artistTagMapper.batchInsert(list);
     }
 
     private void replaceSimilarArtists(UUID artistId, List<EnrichedArtist.SimilarRef> similar) {
-        jdbc.update("DELETE FROM similar_artists WHERE artist_id = ?", artistId);
+        similarArtistMapper.deleteByArtistId(artistId);
         if (similar.isEmpty()) return;
 
-        List<Object[]> batch = new ArrayList<>();
-        for (EnrichedArtist.SimilarRef ref : similar) {
-            UUID simId = resolveArtistId(ref.name(), ref.mbid());
-            if (!simId.equals(artistId)) {
-                batch.add(new Object[]{artistId, simId, ref.score(), "lastfm"});
-            }
-        }
-        if (!batch.isEmpty()) {
-            jdbc.batchUpdate(
-                    "INSERT INTO similar_artists (artist_id, similar_artist_id, lastfm_score, source) VALUES (?, ?, ?, ?)",
-                    batch);
+        List<SimilarArtist> rows = similar.stream()
+                .map(ref -> {
+                    UUID simId = resolveArtistId(ref.name(), ref.mbid());
+                    return SimilarArtist.builder()
+                            .artistId(artistId)
+                            .similarArtistId(simId)
+                            .lastfmScore(ref.score())
+                            .source("lastfm")
+                            .build();
+                })
+                .filter(sa -> !sa.getSimilarArtistId().equals(artistId))
+                .toList();
+
+        if (!rows.isEmpty()) {
+            similarArtistMapper.batchInsert(rows);
         }
     }
 
     private UUID resolveArtistId(String name, String mbid) {
-        return artistRepository.findByNameIgnoreCase(name)
+        return artistMapper.findByNameIgnoreCase(name)
                 .map(Artist::getId)
                 .orElseGet(() -> {
-                    Artist stub = Artist.builder().name(name).mbid(mbid).build();
-                    return artistRepository.saveAndFlush(stub).getId();
+                    Artist stub = Artist.builder()
+                            .id(UUID.randomUUID())
+                            .name(name)
+                            .mbid(mbid)
+                            .createdAt(LocalDateTime.now())
+                            .build();
+                    artistMapper.insert(stub);
+                    return stub.getId();
                 });
     }
 }

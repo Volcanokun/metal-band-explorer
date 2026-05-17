@@ -1,6 +1,8 @@
 package com.metalexplorer.batch;
 
 import com.metalexplorer.batch.steps.*;
+import com.metalexplorer.mapper.SimilarArtistMapper;
+import com.metalexplorer.mapper.TagCooccurrenceMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.Step;
@@ -9,7 +11,6 @@ import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.batch.core.step.builder.StepBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 
 @Configuration
@@ -20,7 +21,6 @@ public class ArtistDiscoveryJob {
     private final PlatformTransactionManager transactionManager;
     private final BatchJobMetricsListener metricsListener;
 
-    // @Bean名を "discoveryJob" にして @Configuration クラス名 "artistDiscoveryJob" との衝突を回避
     @Bean
     public Job discoveryJob(Step artistEnrichStep,
                              Step tagCooccurrenceStep,
@@ -48,10 +48,9 @@ public class ArtistDiscoveryJob {
                 .build();
     }
 
-    // Tasklet インスタンスを @Bean で明示宣言することで Step @Bean との名前衝突を回避
     @Bean
-    public TagCooccurrenceStep tagCooccurrenceTasklet(JdbcTemplate jdbc) {
-        return new TagCooccurrenceStep(jdbc);
+    public TagCooccurrenceStep tagCooccurrenceTasklet(TagCooccurrenceMapper tagCooccurrenceMapper) {
+        return new TagCooccurrenceStep(tagCooccurrenceMapper);
     }
 
     @Bean
@@ -62,8 +61,8 @@ public class ArtistDiscoveryJob {
     }
 
     @Bean
-    public ComputedSimilarityStep computedSimilarityTasklet(JdbcTemplate jdbc) {
-        return new ComputedSimilarityStep(jdbc);
+    public ComputedSimilarityStep computedSimilarityTasklet(SimilarArtistMapper similarArtistMapper) {
+        return new ComputedSimilarityStep(similarArtistMapper);
     }
 
     @Bean
