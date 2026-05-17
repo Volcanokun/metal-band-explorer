@@ -6,7 +6,9 @@ import io.github.resilience4j.retry.annotation.Retry;
 import io.github.resilience4j.timelimiter.annotation.TimeLimiter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.DefaultResponseErrorHandler;
 import org.springframework.web.client.RestClient;
 
 import java.util.List;
@@ -22,7 +24,10 @@ public class LastfmClient {
     public LastfmClient(RestClient.Builder builder,
                         @Value("${lastfm.base-url}") String baseUrl,
                         @Value("${lastfm.api-key}") String apiKey) {
-        this.restClient = builder.baseUrl(baseUrl).build();
+        var errorHandler = new DefaultResponseErrorHandler();
+        this.restClient = builder.baseUrl(baseUrl)
+                .defaultStatusHandler(HttpStatusCode::isError, (req, resp) -> errorHandler.handleError(resp))
+                .build();
         this.apiKey = apiKey;
     }
 

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.metalexplorer.mapper.ArtistMapper">
+
+    <select id="findByNameIgnoreCase" resultType="com.metalexplorer.domain.artist.Artist">
+        SELECT id, name, mbid, listeners, playcount, bio_summary, last_fetched_at, created_at
+        FROM artists
+        WHERE LOWER(name) = LOWER(#{name})
+    </select>
+
+    <select id="findByNameContainingIgnoreCase" resultType="com.metalexplorer.domain.artist.Artist">
+        SELECT id, name, mbid, listeners, playcount, bio_summary, last_fetched_at, created_at
+        FROM artists
+        WHERE LOWER(name) LIKE LOWER(CONCAT('%', #{name}, '%'))
+    </select>
+
+    <insert id="insert">
+        INSERT INTO artists (id, name, mbid, listeners, playcount, bio_summary, last_fetched_at, created_at)
+        VALUES (#{id}, #{name}, #{mbid}, #{listeners}, #{playcount}, #{bioSummary}, #{lastFetchedAt}, #{createdAt})
+    </insert>
+
+    <update id="update">
+        UPDATE artists
+        SET mbid           = #{mbid},
+            listeners      = #{listeners},
+            playcount      = #{playcount},
+            bio_summary    = #{bioSummary},
+            last_fetched_at = #{lastFetchedAt}
+        WHERE id = #{id}
+    </update>
+
+    <select id="count" resultType="long">
+        SELECT COUNT(*) FROM artists
+    </select>
+
+    <select id="findStaleNames" resultType="string">
+        SELECT name FROM artists
+        WHERE last_fetched_at IS NULL
+           OR last_fetched_at &lt; #{cutoff}
+        ORDER BY last_fetched_at ASC NULLS FIRST
+        LIMIT #{limit}
+    </select>
+
+</mapper>

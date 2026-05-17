@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.metalexplorer.mapper.TagCooccurrenceMapper">
+
+    <delete id="deleteAll">
+        DELETE FROM tag_cooccurrence
+    </delete>
+
+    <insert id="insertFromArtistTags">
+        INSERT INTO tag_cooccurrence (tag_a, tag_b, count)
+        SELECT a.tag_name, b.tag_name, COUNT(*)
+        FROM artist_tags a
+        JOIN artist_tags b
+          ON a.artist_id = b.artist_id
+         AND a.tag_name &lt; b.tag_name
+        GROUP BY a.tag_name, b.tag_name
+    </insert>
+
+</mapper>

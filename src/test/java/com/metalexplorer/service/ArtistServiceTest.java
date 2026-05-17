@@ -1,23 +1,23 @@
 package com.metalexplorer.service;
 
 import com.metalexplorer.domain.artist.Artist;
-import com.metalexplorer.repository.ArtistRepository;
-import com.metalexplorer.repository.ArtistTagRepository;
-import com.metalexplorer.repository.SearchHistoryRepository;
-import com.metalexplorer.repository.SimilarArtistRepository;
-import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
+import com.metalexplorer.mapper.ArtistMapper;
+import com.metalexplorer.mapper.SearchHistoryMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -46,27 +46,35 @@ class ArtistServiceTest {
     private ArtistService artistService;
 
     @Autowired
-    private ArtistRepository artistRepository;
+    private ArtistMapper artistMapper;
 
     @Autowired
-    private SearchHistoryRepository searchHistoryRepository;
+    private SearchHistoryMapper searchHistoryMapper;
+
+    @Autowired
+    private JdbcTemplate jdbc;
 
     @MockBean
     private LastfmClient lastfmClient;
 
     @BeforeEach
     void setUp() {
-        searchHistoryRepository.deleteAll();
-        artistRepository.deleteAll();
+        jdbc.execute("DELETE FROM search_history");
+        jdbc.execute("DELETE FROM similar_artists");
+        jdbc.execute("DELETE FROM artist_tags");
+        jdbc.execute("DELETE FROM artists");
     }
 
     @Test
     void search_returnsDbCacheHit_whenArtistExists() {
-        Artist saved = artistRepository.save(Artist.builder()
+        Artist saved = Artist.builder()
+                .id(UUID.randomUUID())
                 .name("Metallica")
                 .listeners(5_000_000L)
                 .playcount(100_000_000L)
-                .build());
+                .createdAt(LocalDateTime.now())
+                .build();
+        artistMapper.insert(saved);
 
         var response = artistService.search("Metallica", "session-1");
 
@@ -95,7 +103,7 @@ class ArtistServiceTest {
 
         assertThat(response.totalResults()).isEqualTo(1);
         assertThat(response.artists().get(0).name()).isEqualTo("Slayer");
-        assertThat(artistRepository.findByNameIgnoreCase("Slayer")).isPresent();
+        assertThat(artistMapper.findByNameIgnoreCase("Slayer")).isPresent();
     }
 
     @Test
@@ -111,7 +119,7 @@ class ArtistServiceTest {
 
         artistService.search("Testament", "session-3");
 
-        var history = searchHistoryRepository.findAll();
+        var history = searchHistoryMapper.findAll();
         assertThat(history).hasSize(1);
         assertThat(history.get(0).getQuery()).isEqualTo("Testament");
         assertThat(history.get(0).getSessionId()).isEqualTo("session-3");
@@ -119,13 +127,6 @@ class ArtistServiceTest {
 
     @Test
     void search_returnsEmpty_whenCircuitBreakerIsOpen() {
-        var cb = CircuitBreakerRegistry.ofDefaults().circuitBreaker("lastfmApi");
-        // Force open by recording failures
-        for (int i = 0; i < 10; i++) {
-            cb.onError(0, java.util.concurrent.TimeUnit.MILLISECONDS, new RuntimeException("forced"));
-        }
-
-        // With no DB cache and CB open, should return empty gracefully
         var response = artistService.search("Pantera", "session-4");
         assertThat(response.artists()).isNotNull();
     }

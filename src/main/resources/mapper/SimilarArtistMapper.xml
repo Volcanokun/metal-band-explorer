@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.metalexplorer.mapper.SimilarArtistMapper">
+
+    <select id="findByArtistIdWithRef" resultType="com.metalexplorer.domain.artist.SimilarArtist">
+        SELECT sa.artist_id,
+               sa.similar_artist_id,
+               a.name              AS similar_artist_name,
+               sa.lastfm_score,
+               sa.computed_score,
+               sa.source
+        FROM similar_artists sa
+        JOIN artists a ON a.id = sa.similar_artist_id
+        WHERE sa.artist_id = #{artistId}
+        ORDER BY sa.lastfm_score DESC
+    </select>
+
+    <delete id="deleteByArtistId">
+        DELETE FROM similar_artists WHERE artist_id = #{artistId}
+    </delete>
+
+    <insert id="batchInsert">
+        INSERT INTO similar_artists (artist_id, similar_artist_id, lastfm_score, source)
+        VALUES
+        <foreach collection="list" item="sa" separator=",">
+            (#{sa.artistId}, #{sa.similarArtistId}, #{sa.lastfmScore}, #{sa.source})
+        </foreach>
+    </insert>
+
+    <update id="updateComputedScores">
+        UPDATE similar_artists
+        SET computed_score = (
+            SELECT CAST(COUNT(*) AS FLOAT) / NULLIF(
+                (SELECT COUNT(DISTINCT tag_name) FROM artist_tags WHERE artist_id = similar_artists.artist_id)
+                + (SELECT COUNT(DISTINCT tag_name) FROM artist_tags WHERE artist_id = similar_artists.similar_artist_id)
+                - COUNT(*),
+                0
+            )
+            FROM artist_tags x
+            JOIN artist_tags y
+              ON x.tag_name = y.tag_name
+             AND x.artist_id = similar_artists.artist_id
+             AND y.artist_id = similar_artists.similar_artist_id
+        )
+        WHERE EXISTS (
+            SELECT 1 FROM artist_tags WHERE artist_id = similar_artists.artist_id
+        )
+    </update>
+
+</mapper>

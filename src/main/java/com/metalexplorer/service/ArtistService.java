@@ -7,10 +7,10 @@ import com.metalexplorer.api.dto.TagDto;
 import com.metalexplorer.domain.artist.Artist;
 import com.metalexplorer.domain.artist.ArtistTag;
 import com.metalexplorer.domain.history.SearchHistory;
-import com.metalexplorer.repository.ArtistRepository;
-import com.metalexplorer.repository.ArtistTagRepository;
-import com.metalexplorer.repository.SearchHistoryRepository;
-import com.metalexplorer.repository.SimilarArtistRepository;
+import com.metalexplorer.mapper.ArtistMapper;
+import com.metalexplorer.mapper.ArtistTagMapper;
+import com.metalexplorer.mapper.SearchHistoryMapper;
+import com.metalexplorer.mapper.SimilarArtistMapper;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import lombok.RequiredArgsConstructor;
@@ -31,10 +31,10 @@ import static net.logstash.logback.argument.StructuredArguments.kv;
 @Slf4j
 public class ArtistService {
 
-    private final ArtistRepository artistRepository;
-    private final ArtistTagRepository artistTagRepository;
-    private final SimilarArtistRepository similarArtistRepository;
-    private final SearchHistoryRepository searchHistoryRepository;
+    private final ArtistMapper artistMapper;
+    private final ArtistTagMapper artistTagMapper;
+    private final SimilarArtistMapper similarArtistMapper;
+    private final SearchHistoryMapper searchHistoryMapper;
     private final LastfmClient lastfmClient;
     private final CircuitBreakerRegistry circuitBreakerRegistry;
     private final MetricsService metricsService;
@@ -43,7 +43,7 @@ public class ArtistService {
     public SearchResponse search(String query, String sessionId) {
         MDC.put("artistName", query);
         try {
-            List<Artist> dbResults = artistRepository.findByNameContainingIgnoreCase(query);
+            List<Artist> dbResults = artistMapper.findByNameContainingIgnoreCase(query);
             if (!dbResults.isEmpty()) {
                 log.info("DB cache hit for query: {}", query);
                 metricsService.recordCacheHit("db");
@@ -62,19 +62,19 @@ public class ArtistService {
 
     @Transactional(readOnly = true)
     public List<TagDto> getTagsByArtistId(UUID artistId) {
-        return artistTagRepository.findByIdArtistIdOrderByWeightDesc(artistId)
+        return artistTagMapper.findByArtistIdOrderByWeightDesc(artistId)
                 .stream()
-                .map(t -> new TagDto(t.getId().getTagName(), t.getWeight()))
+                .map(t -> new TagDto(t.getTagName(), t.getWeight()))
                 .toList();
     }
 
     @Transactional(readOnly = true)
     public List<SimilarArtistDto> getSimilarArtists(UUID artistId) {
-        return similarArtistRepository.findByArtistIdWithRef(artistId)
+        return similarArtistMapper.findByArtistIdWithRef(artistId)
                 .stream()
                 .map(sa -> new SimilarArtistDto(
-                        sa.getSimilarArtistRef().getId(),
-                        sa.getSimilarArtistRef().getName(),
+                        sa.getSimilarArtistId(),
+                        sa.getSimilarArtistName(),
                         sa.getLastfmScore(),
                         sa.getComputedScore()))
                 .toList();
@@ -102,24 +102,25 @@ public class ArtistService {
         }
     }
 
-    // Explicit fallback: DB から類似名称を返しつつ CB 状態と例外種別を構造化ログに出力する
     private List<Artist> lastfmClientSearchFallback(String query, Exception ex) {
         CircuitBreaker cb = circuitBreakerRegistry.circuitBreaker("lastfmApi");
         log.warn("Last.fm API fallback triggered",
                 kv("cbState", cb.getState().name()),
                 kv("exceptionType", ex.getClass().getSimpleName()),
                 kv("query", query));
-        return artistRepository.findByNameContainingIgnoreCase(query);
+        return artistMapper.findByNameContainingIgnoreCase(query);
     }
 
     private Artist fetchAndSaveArtistDetails(String name, String mbid) {
-        Optional<Artist> existing = artistRepository.findByNameIgnoreCase(name);
+        Optional<Artist> existing = artistMapper.findByNameIgnoreCase(name);
         if (existing.isPresent()) return existing.get();
 
         Artist artist = Artist.builder()
+                .id(UUID.randomUUID())
                 .name(name)
                 .mbid(mbid != null && !mbid.isBlank() ? mbid : null)
                 .lastFetchedAt(LocalDateTime.now())
+                .createdAt(LocalDateTime.now())
                 .build();
 
         try {
@@ -138,22 +139,21 @@ public class ArtistService {
             log.warn("Could not fetch artist info for {}: {}", name, e.getMessage());
         }
 
-        artist = artistRepository.save(artist);
+        artistMapper.insert(artist);
 
         try {
             var tagsResult = lastfmClient.getTopTags(name).get();
             if (tagsResult != null && tagsResult.toptags() != null) {
                 var tagList = tagsResult.toptags().tag();
-                if (tagList != null) {
-                    final Artist savedArtist = artist;
-                    var artistTags = tagList.stream().limit(10)
+                if (tagList != null && !tagList.isEmpty()) {
+                    List<ArtistTag> artistTags = tagList.stream().limit(10)
                             .map(t -> ArtistTag.builder()
-                                    .id(new ArtistTag.ArtistTagId(savedArtist.getId(), t.name()))
-                                    .artist(savedArtist)
+                                    .artistId(artist.getId())
+                                    .tagName(t.name())
                                     .weight(parseInt(t.count()))
                                     .build())
                             .toList();
-                    artistTagRepository.saveAll(artistTags);
+                    artistTagMapper.batchInsert(artistTags);
                 }
             }
         } catch (Exception e) {
@@ -164,10 +164,12 @@ public class ArtistService {
     }
 
     private void recordHistory(String sessionId, String query, UUID resolvedArtistId) {
-        searchHistoryRepository.save(SearchHistory.builder()
+        searchHistoryMapper.insert(SearchHistory.builder()
+                .id(UUID.randomUUID())
                 .sessionId(sessionId)
                 .query(query)
                 .resolvedArtistId(resolvedArtistId)
+                .searchedAt(LocalDateTime.now())
                 .build());
     }
 
@@ -175,8 +177,8 @@ public class ArtistService {
         var dtos = artists.stream().map(a -> new ArtistDto(
                 a.getId(), a.getName(), a.getMbid(),
                 a.getListeners(), a.getPlaycount(), a.getBioSummary(),
-                artistTagRepository.findByIdArtistIdOrderByWeightDesc(a.getId())
-                        .stream().map(t -> new TagDto(t.getId().getTagName(), t.getWeight())).toList()
+                artistTagMapper.findByArtistIdOrderByWeightDesc(a.getId())
+                        .stream().map(t -> new TagDto(t.getTagName(), t.getWeight())).toList()
         )).toList();
         return new SearchResponse(query, dtos.size(), dtos);
     }

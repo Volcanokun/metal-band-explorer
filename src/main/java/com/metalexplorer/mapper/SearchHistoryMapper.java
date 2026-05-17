@@ -1,0 +1,14 @@
+package com.metalexplorer.mapper;
+
+import com.metalexplorer.domain.history.SearchHistory;
+import org.apache.ibatis.annotations.Mapper;
+
+import java.util.List;
+
+@Mapper
+public interface SearchHistoryMapper {
+
+    void insert(SearchHistory history);
+
+    List<SearchHistory> findAll();
+}

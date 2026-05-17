@@ -1,10 +1,10 @@
 package com.metalexplorer.batch.steps;
 
+import com.metalexplorer.mapper.ArtistMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.configuration.annotation.StepScope;
 import org.springframework.batch.item.ItemReader;
 import org.springframework.core.io.ClassPathResource;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 import java.io.BufferedReader;
@@ -20,11 +20,11 @@ import java.util.stream.Collectors;
 @Slf4j
 public class SeedArtistReader implements ItemReader<String> {
 
-    private final JdbcTemplate jdbc;
+    private final ArtistMapper artistMapper;
     private Iterator<String> iterator;
 
-    public SeedArtistReader(JdbcTemplate jdbc) {
-        this.jdbc = jdbc;
+    public SeedArtistReader(ArtistMapper artistMapper) {
+        this.artistMapper = artistMapper;
     }
 
     @Override
@@ -36,8 +36,8 @@ public class SeedArtistReader implements ItemReader<String> {
     }
 
     private void initialize() {
-        Long count = jdbc.queryForObject("SELECT COUNT(*) FROM artists", Long.class);
-        if (count == null || count == 0) {
+        long count = artistMapper.count();
+        if (count == 0) {
             log.info("Artists table is empty — loading from seeds.csv");
             iterator = loadFromCsv().iterator();
         } else {
@@ -61,14 +61,6 @@ public class SeedArtistReader implements ItemReader<String> {
 
     private List<String> loadStaleFromDb() {
         LocalDateTime cutoff = LocalDateTime.now().minusDays(7);
-        return jdbc.queryForList(
-                """
-                SELECT name FROM artists
-                WHERE last_fetched_at IS NULL
-                   OR last_fetched_at < ?
-                ORDER BY last_fetched_at ASC NULLS FIRST
-                LIMIT 500
-                """,
-                String.class, cutoff);
+        return artistMapper.findStaleNames(cutoff, 500);
     }
 }
